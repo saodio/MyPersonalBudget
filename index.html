@@ -197,6 +197,7 @@
     <button class="tab-btn" data-tab="daughter">Daughter's Expenses</button>
     <button class="tab-btn" data-tab="paybenefits">Pay &amp; Benefits</button>
     <button class="tab-btn" data-tab="estimator">Pay Estimator</button>
+    <button class="tab-btn" data-tab="newhouse">New House</button>
   </nav>
 
   <!-- ============ TAB 1: INCOME & EXPENSES ============ -->
@@ -342,6 +343,22 @@
     <div class="scenario-grid" id="scenarioGrid" style="margin-top:16px;"></div>
   </section>
 
+  <section class="panel" id="panel-newhouse">
+  <h2 class="section-title">New House Wishlist</h2>
+  <p class="section-desc">Items you want for the house — with a link, description, and cost. Check the box next to an item to include it in your running total.</p>
+  <form class="inline-add" id="houseForm">
+    <div class="field"><label>Link (optional)</label><input type="url" id="h_link" class="wide" placeholder="https://..."></div>
+    <button class="btn ghost" type="button" id="h_autofillBtn">Try auto-fill from link</button>
+    <div class="field"><label>Item</label><input type="text" id="h_name" class="wide" placeholder="e.g. Dining table" required></div>
+    <div class="field"><label>Description / Notes</label><input type="text" id="h_desc" class="wide" placeholder="Optional notes"></div>
+    <div class="field"><label>Cost ($)</label><input type="number" step="0.01" class="small" id="h_cost"></div>
+    <button class="btn" type="submit">+ Add item</button>
+  </form>
+  <div id="h_autofillStatus" style="font-size:12px;color:var(--ink-soft);margin:-10px 0 14px;"></div>
+  <div class="table-scroll"><table id="houseTable"></table></div>
+  <div class="card-grid" id="houseStats"></div>
+</section>
+
   <footer class="foot">Your data is stored privately and persists in this browser for this app.</footer>
 </div>
 
@@ -411,6 +428,7 @@
       recurringItems: [], // {id,name,kind:'income'|'fixed'|'nonfixed',category,amount,freq:'every'|'monthly'|'once',dueDay,dueDate,startDate}
       periodOverrides: {}, // dateISO -> {frozen:bool, income:number, fixedItems:[{id,name,category,amount}], nonfixedItems:[...], removedIds:[], amountOverrides:{}, extraItems:[]}
       daughterExpenses: [], // {id,date,category,desc,amount,paidby,reimbursed}
+      houseItems: [], // {id,link,name,desc,cost,checked}
       payBenefits: {
         pay: { employer:"", annualGross:"", grossPerPeriod:"", taxPct:"", taxAmount:"", retirementPct:"", retirementAmount:"", healthPremium:"", otherDeductions:"" },
         health: { planName:"", deductible:"", oopMax:"", copay:"", coinsurancePct:"", hsaFsaBalance:"", hsaFsaContribution:"" },
@@ -893,6 +911,89 @@
     `;
   }
 
+    // ---------- new house wishlist ----------
+  function renderHouse(){
+    const tbl = document.getElementById('houseTable');
+    let html = `<thead><tr><th></th><th>Item</th><th>Description</th><th>Link</th><th class="num">Cost</th><th></th></tr></thead><tbody>`;
+    if(data.houseItems.length===0){
+      html += `<tr><td colspan="6" class="empty-note">No items yet — add something you want for the house above.</td></tr>`;
+    }
+    data.houseItems.forEach(item=>{
+      html += `<tr data-id="${item.id}">
+        <td><input type="checkbox" class="h-check" ${item.checked?'checked':''}></td>
+        <td><input type="text" class="h-name" value="${escapeAttr(item.name||'')}" style="width:160px;"></td>
+        <td><input type="text" class="h-desc" value="${escapeAttr(item.desc||'')}" style="width:200px;"></td>
+        <td>${item.link ? `<a href="${escapeAttr(item.link)}" target="_blank" rel="noopener" style="color:var(--primary);">link</a>` : ''}</td>
+        <td class="num"><input type="number" step="0.01" class="h-cost small" value="${item.cost||0}"></td>
+        <td><button class="icon-btn h-remove" title="Remove item">✕</button></td>
+      </tr>`;
+    });
+    html += `</tbody>`;
+    tbl.innerHTML = html;
+
+    document.querySelectorAll('.h-check').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const item = data.houseItems.find(i=>i.id===cb.closest('tr').dataset.id);
+        item.checked = cb.checked;
+        scheduleSave(); renderHouseStats();
+      });
+    });
+    document.querySelectorAll('.h-name, .h-desc, .h-cost').forEach(inp=>{
+      inp.addEventListener('change', ()=>{
+        const item = data.houseItems.find(i=>i.id===inp.closest('tr').dataset.id);
+        item.name = inp.closest('tr').querySelector('.h-name').value;
+        item.desc = inp.closest('tr').querySelector('.h-desc').value;
+        item.cost = Number(inp.closest('tr').querySelector('.h-cost').value)||0;
+        scheduleSave(); renderHouseStats();
+      });
+    });
+    document.querySelectorAll('.h-remove').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.closest('tr').dataset.id;
+        data.houseItems = data.houseItems.filter(i=>i.id!==id);
+        scheduleSave(); renderHouse();
+      });
+    });
+    renderHouseStats();
+  }
+
+  function renderHouseStats(){
+    const selected = data.houseItems.filter(i=>i.checked);
+    const selectedTotal = selected.reduce((s,i)=>s+Number(i.cost||0),0);
+    const allTotal = data.houseItems.reduce((s,i)=>s+Number(i.cost||0),0);
+    document.getElementById('houseStats').innerHTML = `
+      <div class="stat-card"><div class="label">Total Selected</div><div class="value">${fmtMoney(selectedTotal)}</div></div>
+      <div class="stat-card"><div class="label">Total (All Items)</div><div class="value">${fmtMoney(allTotal)}</div></div>
+      <div class="stat-card"><div class="label"># Items Selected</div><div class="value">${selected.length} / ${data.houseItems.length}</div></div>
+    `;
+  }
+
+  async function tryAutofillFromLink(){
+    const url = document.getElementById('h_link').value.trim();
+    const statusEl = document.getElementById('h_autofillStatus');
+    if(!url){ statusEl.textContent = "Paste a link first."; return; }
+    statusEl.textContent = "Looking up page details…";
+    try{
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      const res = await fetch(proxyUrl);
+      if(!res.ok) throw new Error('fetch failed');
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const getMeta = (prop)=>{
+        const el = doc.querySelector(`meta[property="${prop}"]`) || doc.querySelector(`meta[name="${prop}"]`);
+        return el ? el.getAttribute('content') : null;
+      };
+      const title = getMeta('og:title') || (doc.querySelector('title') ? doc.querySelector('title').textContent : null);
+      const desc = getMeta('og:description') || getMeta('description');
+      const price = getMeta('product:price:amount') || getMeta('og:price:amount');
+      if(title) document.getElementById('h_name').value = title.trim().slice(0,120);
+      if(desc) document.getElementById('h_desc').value = desc.trim().slice(0,200);
+      if(price) document.getElementById('h_cost').value = parseFloat(price)||'';
+      statusEl.textContent = (title||price) ? "Filled in what we could find — please double check before adding." : "Couldn't detect details automatically; please fill in manually.";
+    }catch(e){
+      statusEl.textContent = "Couldn't reach that page automatically; please fill in manually.";
+    }
+  }
   // ---------- pay & benefits ----------
   const PAY_FIELD_DEFS = [
     ["employer","Employer"], ["annualGross","Annual Gross Salary ($)"], ["grossPerPeriod","Gross Pay / Period ($)"],
@@ -1031,6 +1132,7 @@
     renderDaughter();
     renderPayBenefits();
     renderScenarios();
+    renderHouse();
     document.getElementById('hidePastToggle').checked = !!data.hidePast;
     document.getElementById('anchorDate').value = data.schedule.anchor;
     document.getElementById('monthsBack').value = data.schedule.monthsBack;
@@ -1133,6 +1235,19 @@
     });
   }
 
+  function wireHouseTab(){
+  document.getElementById('h_autofillBtn').addEventListener('click', tryAutofillFromLink);
+  document.getElementById('houseForm').addEventListener('submit', e=>{
+    e.preventDefault();
+    const item = { ... };
+    if(!item.name) return;
+    data.houseItems.push(item);
+    scheduleSave();
+    e.target.reset();
+    document.getElementById('h_autofillStatus').textContent = '';
+    renderHouse();
+  });
+}
   // ---------- init ----------
   async function handleSignedIn(user){
     currentUser = user;
@@ -1146,6 +1261,7 @@
     wireIncomeTab();
     wireDaughterTab();
     wireEstimatorTab();
+    wireHouseTab();
     wireAuthUI();
 
     if(!SUPABASE_URL.startsWith('http') || SUPABASE_ANON_KEY.includes('YOUR_')){
