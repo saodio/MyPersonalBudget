@@ -1239,7 +1239,14 @@
   document.getElementById('h_autofillBtn').addEventListener('click', tryAutofillFromLink);
   document.getElementById('houseForm').addEventListener('submit', e=>{
     e.preventDefault();
-    const item = { ... };
+    const item = {
+  id: uid(),
+  link: document.getElementById('h_link').value.trim(),
+  name: document.getElementById('h_name').value.trim(),
+  desc: document.getElementById('h_desc').value.trim(),
+  cost: Number(document.getElementById('h_cost').value)||0,
+  checked: false
+};
     if(!item.name) return;
     data.houseItems.push(item);
     scheduleSave();
